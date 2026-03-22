@@ -81,15 +81,37 @@ def _delegate_for(tracking_uri: str):
     from mlflow.store.tracking.rest_store import RestStore  # type: ignore
     return RestStore(base)
 
-# ---------------- YPROV HELPERS (unchanged) ----------------
+# ---------------- OUTPUT FORMAT CONFIG ----------------
+# Control what prov4ml generates on run end via YPROV_OUTPUT_FORMAT env var.
+# Comma-separated values: "json", "dot", "img", "svg", "ro-crate"
+# Default: "json" (only the PROV JSON document)
+# Example: YPROV_OUTPUT_FORMAT="json,dot,img"
 
-def _yprov_end_run_with_json():
+def _parse_output_formats():
+    raw = os.getenv("YPROV_OUTPUT_FORMAT", "json").lower()
+    formats = {f.strip() for f in raw.split(",") if f.strip()}
+    if not formats:
+        formats = {"json"}
+    return formats
+
+# ---------------- YPROV HELPERS ----------------
+
+def _yprov_end_run():
     if not yprov:
         return False
+
+    formats = _parse_output_formats()
+    create_graph = "dot" in formats or "img" in formats
+    create_svg = "svg" in formats or "img" in formats
+    create_ro_crate = "ro-crate" in formats
+
+    _debug(f"  Output formats requested: {formats}")
+    _debug(f"  create_graph={create_graph}, create_svg={create_svg}, create_ro_crate={create_ro_crate}")
+
     attempts = [
-        lambda: yprov.end_run(create_graph=True, create_svg=False, crate_ro_crate=False),
-        lambda: yprov.end_run(create_graph=True, create_svg=False),
-        lambda: yprov.end_run(create_graph=True),
+        lambda: yprov.end_run(create_graph=create_graph, create_svg=create_svg, crate_ro_crate=create_ro_crate),
+        lambda: yprov.end_run(create_graph=create_graph, create_svg=create_svg),
+        lambda: yprov.end_run(create_graph=create_graph),
         lambda: yprov.end_run(),
     ]
     for i, attempt in enumerate(attempts):
@@ -222,8 +244,13 @@ class YProvTrackingStore(AbstractStore):
         else:
             self._delegate = delegate
 
-        # tests expect _prov_out to exist and reflect YPROV_OUT_DIR
-        self._prov_out = Path(os.getenv("YPROV_OUT_DIR", "data/prov"))
+        # Prov output directory: YPROV_PROV_PATH > YPROV_OUT_DIR > default
+        # YPROV_PROV_PATH: explicit full path to the provenance output directory
+        # YPROV_OUT_DIR: base directory (kept for backward compatibility)
+        self._prov_out = Path(
+            os.getenv("YPROV_PROV_PATH")
+            or os.getenv("YPROV_OUT_DIR", "data/prov")
+        )
         self._prov_out.mkdir(parents=True, exist_ok=True)
 
         _debug(f"🟢 YProvTrackingStore initialized with URI: {store_uri}")
@@ -294,7 +321,7 @@ class YProvTrackingStore(AbstractStore):
     def set_terminated(self, run_id, status, end_time):
         _debug(f"set_terminated called: run_id={run_id}, status={status}")
         if yprov:
-            _yprov_end_run_with_json()
+            _yprov_end_run()
         else:
             _debug("  ⚠ prov4ml not available")
         return self._delegate.set_terminated(run_id, status, end_time)
@@ -310,7 +337,7 @@ class YProvTrackingStore(AbstractStore):
             pass
         _debug(f"  is_terminal={is_terminal}, end_time={end_time}")
         if yprov and is_terminal:
-            _yprov_end_run_with_json()
+            _yprov_end_run()
         return self._delegate.update_run_info(run_id, run_status, end_time, **kwargs)
 
     def log_param(self, run_id, param):

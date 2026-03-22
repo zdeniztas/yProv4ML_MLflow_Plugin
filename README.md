@@ -8,9 +8,17 @@ yProv4ML_MLflow_Plugin/
 ├── examples/                   # Example training scripts
 │   ├── demo.py                 # CIFAR-10 example
 │   ├── mnist_mlflow_demo.py    # MNIST with schedulers
-│   └── run_batch.py            # Grid/random search
+│   ├── run_batch.py            # Grid/random search
+│   ├── prov_reuse_plotting.py  # Provenance-driven reusable plotting
+│   └── schemas/                # YAML provenance schemas
+│       └── ml_pipeline.yaml    # Example ML pipeline schema
 ├── src/                        # Utilities
 │   ├── prov_to_csv.py          # Convert PROV to CSV
+│   ├── prov_join.py            # Join PROV JSON files
+│   ├── prov_multiprocess.py    # Multi-process provenance handling
+│   ├── prov_from_yaml.py       # PROV from YAML schemas
+│   ├── prov_ro_crate.py        # RO-Crate packaging
+│   ├── import_prov_to_mlflow.py # Import PROV to MLflow
 │   └── decision_app.py         # Streamlit dashboard
 ├── test/                       # Test suite
 └── pyproject.toml              # Plugin entry points
@@ -457,6 +465,124 @@ python src/import_prov_to_mlflow.py \
 - Share experiments with collaborators who use MLflow
 - Visualize PROV data in MLflow UI
 
+### 3. PROV JSON Joining
+
+Join multiple PROV JSON files into a unified provenance document, de-duplicating
+entities and activities by their identifiers. Based on initial work by Deniz and
+the [y2Graph](https://github.com/HPCI-Lab/y2Graph) library for joining JSONs by IDs.
+
+```bash
+# Join all prov JSONs under a directory
+python src/prov_join.py --root data/prov/my_experiment --out merged_prov.json
+
+# Join specific files
+python src/prov_join.py --files run1/prov_0.json run2/prov_0.json --out merged.json
+
+# Join with source traceability tags
+python src/prov_join.py --root data/prov --out merged.json --tag-sources
+
+# Join multi-process provenance (GR0/GR1 kept separate)
+python src/prov_join.py --root data/prov --out merged.json --multi-process
+```
+
+**Features**:
+- De-duplicates entities and activities by stable IDs (label, path, run_id)
+- Preserves all relation types (used, wasGeneratedBy, wasDerivedFrom, etc.)
+- Optional `--tag-sources` to track which file each element came from
+- Multi-process mode keeps per-rank metrics separate while merging shared entities
+
+### 4. Multi-Process Provenance
+
+Handle distributed training provenance where prov4ml generates separate metrics
+per process rank (metrics_GR0/, metrics_GR1/, ...).
+
+```bash
+# Join multi-process provenance for a single run
+python src/prov_multiprocess.py --run-dir data/prov/experiment/run_0 --out merged/
+
+# Process all runs with aggregate statistics
+python src/prov_multiprocess.py --experiment-dir data/prov/my_experiment --out merged/ --stats
+
+# Full workflow: join + statistics + CSV export
+python src/prov_multiprocess.py --experiment-dir data/prov/my_experiment --out merged/ --stats --csv
+```
+
+**Features**:
+- Auto-discovers metrics_GR0/, metrics_GR1/, etc. directories
+- Computes aggregate statistics (mean, std, min, max) across processes
+- Joins PROV documents without duplicating shared entities (model, dataset, config)
+- Exports per-experiment CSV summary of aggregated metrics
+
+### 5. YAML-Based Provenance Schemas
+
+Create PROV JSON documents and visualizations from simple YAML files,
+useful for quick schematization (e.g., paper diagrams) without running experiments.
+
+```bash
+# Generate PROV JSON from a YAML schema
+python src/prov_from_yaml.py --schema examples/schemas/ml_pipeline.yaml --out output/pipeline.json
+
+# Also generate DOT graph and SVG image
+python src/prov_from_yaml.py --schema examples/schemas/ml_pipeline.yaml \
+    --out output/pipeline.json --dot --img
+```
+
+See `examples/schemas/ml_pipeline.yaml` for a complete example schema.
+
+### 6. RO-Crate Packaging
+
+Package experiment code, provenance, and artifacts into
+[RO-Crate](https://www.researchobject.org/ro-crate/) archives. RO-Crates are
+snapshots of the current codebase, very useful for reproducibility and for
+reusing the exact code that produced specific results (e.g., for plotting).
+
+```bash
+# Package a single run
+python src/prov_ro_crate.py --run-dir data/prov/experiment/run_0 --out crates/
+
+# Package with source code included
+python src/prov_ro_crate.py --run-dir data/prov/experiment/run_0 \
+    --include-src examples/demo.py yprov_mlflow_plugin/ \
+    --out crates/
+
+# Package with git commit info for traceability
+python src/prov_ro_crate.py --run-dir data/prov/experiment/run_0 --out crates/ --git-info
+
+# Package all runs in an experiment
+python src/prov_ro_crate.py --experiment-dir data/prov/my_experiment --out crates/
+```
+
+**Features**:
+- Creates RO-Crate 1.1 compliant ZIP archives
+- Includes ro-crate-metadata.json with full provenance context
+- Optionally bundles source code for full reproducibility
+- Captures git commit info for traceability
+
+### 7. Provenance-Driven Reusable Plotting
+
+The same plotting code works for ANY experiment that produced PROV JSON,
+demonstrating the power of provenance for code reuse across use cases.
+
+```bash
+# Plot metrics from any experiment's PROV data
+python examples/prov_reuse_plotting.py --prov-dir data/prov/my_experiment
+
+# Compare CIFAR vs MNIST experiments side by side
+python examples/prov_reuse_plotting.py \
+    --prov-dir data/prov/cifar_exp data/prov/mnist_exp \
+    --compare
+
+# Plot from an RO-Crate archive
+python examples/prov_reuse_plotting.py --ro-crate crates/run_0_ro-crate.zip
+
+# Save plots to a directory
+python examples/prov_reuse_plotting.py --prov-dir data/prov/my_experiment --out plots/
+```
+
+**Key Insight**: Because provenance provides a uniform data interface (metrics,
+parameters, artifacts), the same analysis/plotting code can be applied to any
+experiment regardless of the underlying ML task (classification, regression,
+generative, etc.).
 
 ## 🔍 Configuration
 
@@ -465,9 +591,18 @@ python src/import_prov_to_mlflow.py \
 Control plugin behavior via environment variables:
 
 ```bash
-# PROV output directory
+# PROV output directory (base path)
 export YPROV_OUT_DIR="/path/to/prov/output"
 # Default: data/prov
+
+# Explicit full prov path (takes precedence over YPROV_OUT_DIR)
+export YPROV_PROV_PATH="/explicit/path/to/prov"
+
+# Output format control: comma-separated list of formats
+# Options: "json", "dot", "img", "svg", "ro-crate"
+export YPROV_OUTPUT_FORMAT="json"
+# Default: json
+# Example: YPROV_OUTPUT_FORMAT="json,dot,img"  (generates all three)
 
 # Enable debug logging
 export YPROV_DEBUG="1"

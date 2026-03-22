@@ -1,0 +1,118 @@
+# Example YAML schema for a typical ML pipeline provenance graph.
+# Use with: python src/prov_from_yaml.py --schema examples/schemas/ml_pipeline.yaml --out output/pipeline.json --dot --img
+
+prefix:
+  ex: "http://example.org/ml/"
+  yProv4ML: "http://yprov4ml.2024/"
+
+entities:
+  - id: "ex:raw_dataset"
+    label: "Raw Dataset (CIFAR-10)"
+    type: "Dataset"
+    attributes:
+      format: "images"
+      samples: 60000
+      classes: 10
+
+  - id: "ex:preprocessed_data"
+    label: "Preprocessed Data"
+    type: "Dataset"
+    attributes:
+      transform: "normalize + augment"
+
+  - id: "ex:trained_model"
+    label: "Trained CNN Model"
+    type: "Model"
+    attributes:
+      architecture: "Conv2D(3->20->64) + FC"
+      parameters: 36864
+
+  - id: "ex:evaluation_results"
+    label: "Evaluation Results"
+    type: "Metrics"
+    attributes:
+      accuracy: 0.93
+      loss: 0.27
+
+  - id: "ex:prov_document"
+    label: "PROV JSON Document"
+    type: "Provenance"
+
+  - id: "ex:carbon_report"
+    label: "Carbon Emissions Report"
+    type: "SustainabilityMetrics"
+    attributes:
+      emissions_kg_co2: 0.0042
+      energy_kwh: 0.015
+
+activities:
+  - id: "ex:preprocessing"
+    label: "Data Preprocessing"
+    attributes:
+      duration_ms: 1200
+
+  - id: "ex:training"
+    label: "Model Training"
+    attributes:
+      epochs: 10
+      lr: 0.001
+      batch_size: 32
+      optimizer: "Adam"
+
+  - id: "ex:evaluation"
+    label: "Model Evaluation"
+    attributes:
+      test_samples: 10000
+
+agents:
+  - id: "ex:researcher"
+    label: "ML Researcher"
+    attributes:
+      organization: "HPCI Lab"
+
+  - id: "ex:system"
+    label: "Compute Node"
+    attributes:
+      gpu: "NVIDIA RTX 3090"
+      cpu: "AMD EPYC 7742"
+
+relations:
+  - type: "used"
+    activity: "ex:preprocessing"
+    entity: "ex:raw_dataset"
+
+  - type: "wasGeneratedBy"
+    entity: "ex:preprocessed_data"
+    activity: "ex:preprocessing"
+
+  - type: "used"
+    activity: "ex:training"
+    entity: "ex:preprocessed_data"
+
+  - type: "wasGeneratedBy"
+    entity: "ex:trained_model"
+    activity: "ex:training"
+
+  - type: "wasGeneratedBy"
+    entity: "ex:carbon_report"
+    activity: "ex:training"
+
+  - type: "used"
+    activity: "ex:evaluation"
+    entity: "ex:trained_model"
+
+  - type: "wasGeneratedBy"
+    entity: "ex:evaluation_results"
+    activity: "ex:evaluation"
+
+  - type: "wasGeneratedBy"
+    entity: "ex:prov_document"
+    activity: "ex:training"
+
+  - type: "wasAssociatedWith"
+    activity: "ex:training"
+    agent: "ex:researcher"
+
+  - type: "wasAssociatedWith"
+    activity: "ex:training"
+    agent: "ex:system"
